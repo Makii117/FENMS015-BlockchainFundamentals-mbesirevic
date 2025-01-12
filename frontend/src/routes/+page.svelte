@@ -6,7 +6,7 @@
     let contract;
     let userAddress;
     let userRole;
-    const contractAddress = "0x3FcbCAc98Cb663fc7447C8326A50ba7Ee8C160a7";
+    const contractAddress = "0x1779B32012d4Fe7D6ff82dB00090D4AB8ba3a818";
 
     const abi = [
     "function getRole(address user) external view returns (uint8)",
@@ -23,10 +23,56 @@
     stateMutability: "nonpayable",
     type: "function"
     },
-    "function purchaseEnergyCredit(uint256 creditId, uint256 quantity)",
-    "function getEnergyCredit(uint256 creditId)",
-    "function getAvailableCredits()",
-
+    {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "creditId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getEnergyCredit",
+    "outputs": [
+      {
+        "internalType": "struct EnergyCredit",
+        "name": "",
+        "type": "tuple",
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "producer",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "quantity",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "price",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "isAvailable",
+            "type": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+    "function applyForProducer()",
+    "function getAvailableCredits() external view returns (uint256[])",
+    "function getDetailedAvailableCredits()",
+    "function purchaseEnergyCredit(uint256 creditId, uint256 quantity)",  
   ];
   let account = null;
   let role = null;
@@ -44,6 +90,7 @@ let selectedCreditId = null;
 let contractWithSigner=null;
 let producerAddress = "";
 let valueName="";
+let loading = true; //check if credits loaded
 
     async function connectMetaMask() {
   // Check if MetaMask is installed
@@ -71,34 +118,51 @@ let valueName="";
     userRole = await(contract).getRole(account)
     role = userRole.toString(); // 1 = Admin, 2 = Producer, 3 = Buyer
     console.log("User Role: ", role)
-    isAdmin = role === "1";
-    isProducer = role === "2";
-    isBuyer = role === "3";
+    isAdmin = role === "2";
+    isProducer = role === "1";
+    isBuyer = role === "0";
+    console.log( account, role, isAdmin, isProducer, isBuyer, contractWithSigner )
+    fetchAvailableCredits()
     return { account, role, isAdmin, isProducer, isBuyer, contractWithSigner };
-} catch (err) {
-console.error("Error connecting to MetaMask:", err);
+  } catch (err) {
+  console.error("Error connecting to MetaMask:", err);
+  }
 }
-}
+
+
 
 async function fetchAvailableCredits() {
   if (!contractWithSigner) return;
-    try {
-        const creditIds = await contractWithSigner.getAvailableCredits();
-        availableCredits = [];
-        for (let id of creditIds) {
-            const credit = await contractWithSigner.getEnergyCredit(id);
-            if (credit.isAvailable) {
-                availableCredits.push({
-                    id: credit.id,
-                    producer: credit.producer,
-                    quantity: credit.quantity,
-                    price: credit.price
-                });
-            }
-        }
-    } catch (err) {
-        console.error("Error fetching available credits:", err);
+  try {
+    console.log("Here1")
+    const creditIds = await contractWithSigner.getAvailableCredits();
+    const creditIdArray = Array.isArray(creditIds) 
+    ? creditIds.map(id => id.toString()) 
+    : []; // if not iterable declare empty
+    console.log("Credit IDs:", creditIdArray);
+    if (!Array.isArray(creditIds)) {
+      console.error("Unexpected creditIds type:", creditIds);
+      return;
     }
+    availableCredits = [];
+    for (let id of creditIdArray) {
+      const credit = await contractWithSigner.getEnergyCredit(id);
+      console.log(`Credit ${id}:`, credit);
+      if (credit.isAvailable) {
+        availableCredits.push({
+          id: id, 
+          producer: credit.producer,
+          quantity: credit.quantity.toString(),
+          price: credit.price.toString()
+        });
+      }
+    }
+    console.log(availableCredits)
+  } catch (err) {
+    console.error("Error fetching credits:", err);
+  } finally {
+    loading = false;
+  }
 }
 
     async function listEnergyCreditHandler() {
@@ -129,6 +193,7 @@ async function listEnergyCredit(amount,price) {
 
       availableCredits += amount; // Update frontend available credits
       console.log("Credits added!");
+      alert("Credits added successfully.")
     } catch (err) {
       console.error("Error adding credits:", err);
     }
@@ -141,7 +206,8 @@ async function listEnergyCredit(amount,price) {
     }
     try {
       const credit = availableCredits.find(c => c.id === selectedCreditId);
-      const totalCost = ethers.BigNumber.from(quantityToBuy).mul(credit.price);
+      const totalCost = BigInt(quantityToBuy) * BigInt(credit.price);
+
 
       const tx = await contractWithSigner.purchaseEnergyCredit(selectedCreditId, quantityToBuy, {
         value: totalCost
@@ -168,6 +234,18 @@ async function listEnergyCredit(amount,price) {
         console.error("Error registering producer:", error);
         alert("Failed to register producer.");
     }
+}
+async function applyForProducer() {
+  try{
+    let tx = await contractWithSigner.applyForProducer();
+    console.log("Apply for producer tx sent:", tx.hash);
+    await tx.wait();
+    console.log("Successfuly registered")
+    alert("Successfuly registered, please refresh your page.")
+  } catch (error) {
+  console.log("Error:", error)
+  alert("Couldn't register for producer.");
+  }
 }
 
 async function assignRole(userAddress, userRole) {
@@ -207,7 +285,6 @@ async function getUserRole(contract, valueName) {
 
    onMount(async () => {
     onMount(connectMetaMask);
-		fetchAvailableCredits()
 	});
   </script>
   
@@ -220,7 +297,7 @@ async function getUserRole(contract, valueName) {
     {/if}
     {#if account}
       <p>Connected Account: {accAddr}</p>
-      <!-- Check for Admin Role -->
+      <!-- Check if admin -->
       {#if isAdmin}
         <div class="admin-view">
           <h2>Admin View</h2>
@@ -238,10 +315,38 @@ async function getUserRole(contract, valueName) {
           <input type="number" id="price" bind:value={price} />
       
           <button on:click={listEnergyCreditHandler}>List Energy Credit</button>
-          <EnergyCredits {contractWithSigner}/>
+          {#if loading}
+          <p>Loading credits, please wait....</p>
+          {:else}
+          <h2>Available Energy Credits</h2>
+          <ul>
+            {#each availableCredits as credit}
+              <li class="card">
+                <strong>Credit ID:</strong> {credit.id}, 
+                <strong>Producer:</strong> {credit.producer},
+                <strong>Quantity:</strong> {credit.quantity} kWh, 
+                <strong>Price:</strong> {credit.price} wei per kWh
+                <button on:click={() => selectedCreditId = credit.id} class="card-button">Select</button>
+              </li>
+            {/each}
+          </ul>
+          {/if}
+          <div class="buyer-view">
+            {#if selectedCreditId !== null}
+              <div>
+                <h3>Buy Credits</h3>
+                <input type="number" min="1" bind:value={quantityToBuy} placeholder="Quantity (kWh)" />
+                <button on:click={purchaseCredits} class="button">Buy Credits</button>
+              </div>
+            {/if}
+          </div>
         </div>
       {/if}
+      <!-- Check if buyer -->
       {#if isBuyer}
+      {#if loading}
+      <p>Loading credits, please wait....</p>
+      {:else}
       <h2>Available Energy Credits</h2>
       <ul>
         {#each availableCredits as credit}
@@ -249,11 +354,12 @@ async function getUserRole(contract, valueName) {
             <strong>Credit ID:</strong> {credit.id}, 
             <strong>Producer:</strong> {credit.producer},
             <strong>Quantity:</strong> {credit.quantity} kWh, 
-            <strong>Price:</strong> {ethers.utils.formatUnits(credit.price.toString(), "wei")} wei per kWh
-            <button on:click={() => selectedCreditId = credit.id} class="button">Select</button>
+            <strong>Price:</strong> {credit.price} wei per kWh
+            <button on:click={() => selectedCreditId = credit.id} class="card-button">Select</button>
           </li>
         {/each}
       </ul>
+      {/if}
         <div class="buyer-view">
             {#if selectedCreditId !== null}
             <div>
@@ -263,7 +369,13 @@ async function getUserRole(contract, valueName) {
             </div>
           {/if}
         </div>
+        <div class="register-as-producer">
+          <p>Input your wallet address</p>
+          <input type="text" id="producer" bind:value={producerAddress} />
+          <button on:click={applyForProducer()} class="button">Register as Producer</button>
+        </div>
       {/if}
+      <!-- Check if producer -->
       {#if isProducer}
       
       <label for="quantity">Quantity (kWh):</label>
@@ -273,22 +385,34 @@ async function getUserRole(contract, valueName) {
       <input type="number" id="price" bind:value={price} />
   
       <button on:click={listEnergyCreditHandler}>List Energy Credit</button>
+      {#if loading}
+      <p>Loading credits, please wait....</p>
+      {:else}
+      <h2>Available Energy Credits</h2>
+      <ul>
+        {#each availableCredits as credit}
+          <li class="card">
+            <strong>Credit ID:</strong> {credit.id}, 
+            <strong>Producer:</strong> {credit.producer},
+            <strong>Quantity:</strong> {credit.quantity} kWh, 
+            <strong>Price:</strong> {credit.price} wei per kWh
+            <button on:click={() => selectedCreditId = credit.id} class="card-button">Select</button>
+          </li>
+        {/each}
+      </ul>
       {/if}
-      {#if selectedCreditId !== null}
-      <div>
-        <h3>Buy Credits</h3>
-        <input type="number" min="1" bind:value={quantityToBuy} placeholder="Quantity (kWh)" />
-        <button on:click={purchaseCredits} class="button">Buy Credits</button>
-      </div>
-        {/if}
+        <div class="buyer-view">
+          {#if selectedCreditId !== null}
+            <div>
+              <h3>Buy Credits</h3>
+              <input type="number" min="1" bind:value={quantityToBuy} placeholder="Quantity (kWh)" />
+              <button on:click={purchaseCredits} class="button">Buy Credits</button>
+            </div>
+          {/if}
+        </div>
+      {/if}
   
-      <!-- Check for Buyer Role -->
 
-
-      {#if isBuyer && !isAdmin && !isProducer} 
-      <input type="text" id="producer" bind:value={producerAddress} />
-      <button on:click={registerProducerHandler} class="button">Register as Producer</button>
-      {/if}
     {/if}
   </div>
   

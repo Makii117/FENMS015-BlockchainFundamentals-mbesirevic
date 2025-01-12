@@ -11,7 +11,6 @@ contract EnergyTrading {
     }
 
     uint256 public creditCount = 0;
-    address public admin;
     uint256[] public availableCreditIds;
     address public owner;
 
@@ -28,41 +27,28 @@ contract EnergyTrading {
         _;
     }
 
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Not the admin");
-        _;
-    }
 
+    enum Role { Buyer, Producer, Admin }
 
-    enum Role { None, Admin, Producer, Buyer }
-
-    
     mapping(address => Role) public roles;
 
-
     constructor() {
-        admin = msg.sender;
         owner = msg.sender;
-        //Deployer is admin by default
         roles[owner] = Role.Admin;  
-        roles[admin] = Role.Admin;
     }
 
-    modifier ensureBuyerRole() {
-        if (roles[msg.sender] == Role.None) {
-            roles[msg.sender] = Role.Buyer;
-            emit RoleAssigned(msg.sender, Role.Buyer);
-        }
-        _;
-    }
+    modifier onlyOwner {
+       require(msg.sender == owner, "Not owner.");
+       _;
+   }
 
-    function applyToBeProducer() external ensureBuyerRole {
+    function applyForProducer() external {
         roles[msg.sender] = Role.Producer;
         registeredProducers[msg.sender] = true;
         emit RoleAssigned(msg.sender, Role.Producer);
     }
 
-    function registerProducer(address producer) public onlyAdmin {
+    function registerProducer(address producer) public onlyOwner {
         registeredProducers[producer] = true;
     }
 
@@ -103,17 +89,27 @@ contract EnergyTrading {
         return availableCreditIds; 
     }
 
-    function getEnergyCredit(uint256 creditId) public view returns (EnergyCredit memory) {
+    function getEnergyCredit(uint256 creditId) external view returns (EnergyCredit memory) {
         return energyCredits[creditId];
     }
+
+    function getDetailedAvailableCredits() external view returns (EnergyCredit[] memory) {
+    uint256 count = availableCreditIds.length;
+    EnergyCredit[] memory availableCredits = new EnergyCredit[](count);
+
+    for (uint256 i = 0; i < count; i++) {
+        availableCredits[i] = energyCredits[availableCreditIds[i]];
+    }
+
+    return availableCredits;
+}
 
     modifier onlyBuyer() {
         require(roles[msg.sender] == Role.Buyer, "Not a buyer");
         _;
     }
 
-    function assignRole(address user, Role role) external onlyAdmin {
-        require(role != Role.None, "Cannot assign no role");
+    function assignRole(address user, Role role) external onlyOwner {
         roles[user] = role;
         emit RoleAssigned(user, role);
     }

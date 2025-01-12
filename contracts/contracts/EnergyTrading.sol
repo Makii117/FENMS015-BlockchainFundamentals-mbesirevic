@@ -6,7 +6,7 @@ contract EnergyTrading {
         uint256 id;
         address producer;
         uint256 quantity; // in kWh
-        uint256 price; // in wei per kWh
+        uint256 price;  // in wei 1 ETH = 1 * 10^18 wei
         bool isAvailable;
     }
 
@@ -16,6 +16,7 @@ contract EnergyTrading {
 
     mapping(uint256 => EnergyCredit) public energyCredits;
     mapping(address => bool) public registeredProducers;
+    mapping(address => uint256) public totalCreditsPurchased;
 
     event CreditListed(uint256 id, address producer, uint256 quantity, uint256 price);
     event CreditPurchased(uint256 id, address buyer, uint256 quantity, uint256 totalCost);
@@ -52,6 +53,11 @@ contract EnergyTrading {
         registeredProducers[producer] = true;
     }
 
+        function getTotalCreditsPurchased(address buyer) external view returns (uint256) {
+        return totalCreditsPurchased[buyer];
+    }
+
+
     function listEnergyCredit(uint256 quantity, uint256 price) public onlyProducer {
         require(quantity > 0, "Quantity must be greater than zero");
         require(price > 0, "Price must be greater than zero");
@@ -81,6 +87,7 @@ contract EnergyTrading {
         }
 
         payable(credit.producer).transfer(totalCost);
+        totalCreditsPurchased[msg.sender] += quantity;
 
         emit CreditPurchased(creditId, msg.sender, quantity, totalCost);
     }

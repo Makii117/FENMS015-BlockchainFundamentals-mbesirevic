@@ -6,7 +6,7 @@
     let contract;
     let userAddress;
     let userRole;
-    const contractAddress = "0x1779B32012d4Fe7D6ff82dB00090D4AB8ba3a818";
+    const contractAddress = "0x197f47C7a0542cD0cE3CeC618B53b3bF7624Ca6A";
 
     const abi = [
     "function getRole(address user) external view returns (uint8)",
@@ -71,6 +71,7 @@
   },
     "function applyForProducer()",
     "function getAvailableCredits() external view returns (uint256[])",
+    "function getTotalCreditsPurchased(address buyer) external view returns (uint256)",
     "function getDetailedAvailableCredits()",
     "function purchaseEnergyCredit(uint256 creditId, uint256 quantity)",  
   ];
@@ -91,6 +92,12 @@ let contractWithSigner=null;
 let producerAddress = "";
 let valueName="";
 let loading = true; //check if credits loaded
+let priceInEUR = 0.1867 // € per KWh
+let ethAmount=0
+let priceInETH = ""
+let totalPrice = 0
+let quantity = 0
+let totalCredits = 0
 
     async function connectMetaMask() {
   // Check if MetaMask is installed
@@ -129,12 +136,16 @@ let loading = true; //check if credits loaded
   }
 }
 
-
+async function fetchTotalCredits() {
+  if(account){
+    totalCredits = await contractWithSigner.getTotalCreditsPurchased(account);
+  }
+  
+}
 
 async function fetchAvailableCredits() {
   if (!contractWithSigner) return;
   try {
-    console.log("Here1")
     const creditIds = await contractWithSigner.getAvailableCredits();
     const creditIdArray = Array.isArray(creditIds) 
     ? creditIds.map(id => id.toString()) 
@@ -153,7 +164,7 @@ async function fetchAvailableCredits() {
           id: id, 
           producer: credit.producer,
           quantity: credit.quantity.toString(),
-          price: credit.price.toString()
+          price: ethers.formatEther(credit.price)
         });
       }
     }
@@ -166,14 +177,33 @@ async function fetchAvailableCredits() {
 }
 
     async function listEnergyCreditHandler() {
-        await listEnergyCredit(amount, price);
+        await listEnergyCredit(amount, priceInETH);
     }
 
-async function listEnergyCredit(amount,price) {
+async function listEnergyCredit(amount,priceInETH) {
     if (!isProducer) {
       alert("Only a producer can add credits!");
       return;
     }
+    console.log(priceInETH)
+
+    let truncatedString 
+    ethAmount = priceInETH.toString()
+
+    try{
+      let [integerPart, decimalPart] = ethAmount.split(".");
+      if (!decimalPart) {
+      pass
+      }
+      if (decimalPart.length > 18) {
+      decimalPart = decimalPart.slice(0, 18);
+    }
+    truncatedString = integerPart + "." + decimalPart;
+    } catch(err){
+      console.log(err)
+    }
+    console.log("truncated",{truncatedString})
+    price = ethers.parseEther(truncatedString)
 
     try {
         if (!amount || !price) {
@@ -206,7 +236,9 @@ async function listEnergyCredit(amount,price) {
     }
     try {
       const credit = availableCredits.find(c => c.id === selectedCreditId);
-      const totalCost = BigInt(quantityToBuy) * BigInt(credit.price);
+
+      const priceInWei = ethers.parseUnits(credit.price.toString(), 18);
+      const totalCost = priceInWei * BigInt(quantityToBuy);
 
 
       const tx = await contractWithSigner.purchaseEnergyCredit(selectedCreditId, quantityToBuy, {
@@ -217,9 +249,15 @@ async function listEnergyCredit(amount,price) {
       await tx.wait();
 
       console.log("Credits purchased successfully!");
+      displaySuccessPopup();
       await fetchAvailableCredits(); 
     } catch (err) {
       console.error("Error purchasing credits:", err);
+      if (err.message && err.message.includes("insufficient funds")) {
+      alert("Insufficient funds for this transaction. Please check your balance.");
+    } else {
+      alert("An error occurred while purchasing credits. Please try again.");
+    }
     }
   }
 
@@ -280,24 +318,86 @@ async function getUserRole(contract, valueName) {
     return "Error";
   }
 }
+async function getCurrencyConversions(){
+  try{
+    const response = await fetch(`http://77.239.3.207:3001/currency-conversion?priceInEUR=${priceInEUR}`);
+    console.log(response)
+    const data = await response.json()
+
+    if (data.Response === "Error") {
+            console.error("Error fetching data:", data.Message);
+            return;
+    }
+    let truncatedString 
+    const returnedPrice = data.priceInETH
+    ethAmount = returnedPrice.toString()
+
+    try{
+      let [integerPart, decimalPart] = ethAmount.split(".");
+      if (!decimalPart) {
+      pass
+      }
+      if (decimalPart.length > 18) {
+      decimalPart = decimalPart.slice(0, 18);
+    }
+    truncatedString = integerPart + "." + decimalPart;
+    } catch(err){
+      console.log(err)
+    }
+    console.log("truncated",{truncatedString})
+    const wei = ethers.parseEther(truncatedString);
+    console.log("Wei: ",{wei})
+    console.log(`${priceInEUR} EUR is approximately ${ethAmount} ETH`);
+    } catch(err){
+    console.log(err)
+  }
+}
+function displaySuccessPopup() {
+  const successPopup = document.getElementById("success-popup");
+  successPopup.style.display = "block"; // Show the popup
+
+  // Hide the popup after 3 seconds
+  setTimeout(() => {
+    successPopup.style.display = "none";
+  }, 3000);
+}
 
 
-
+function updateTotalPrice() {
+    try {
+      const credit = availableCredits.find(c => c.id === selectedCreditId);
+      totalPrice = credit.price * quantity
+  }catch(err){
+    console.log(err)
+  }
+}
+  function handleQuantityChange(event) {
+    quantity = event.target.value;
+    updateTotalPrice();
+  }
+  $: account, fetchTotalCredits();
+  $: totalCredits, fetchTotalCredits();
    onMount(async () => {
     onMount(connectMetaMask);
+    getCurrencyConversions()
+    updateTotalPrice();
 	});
   </script>
   
   <div>
     <h1>Energy Trading App</h1>
-    <h2>1 wei = 1kWh</h2>   
+    <h2>1kWh = {ethAmount} ETH = {priceInEUR} €</h2>   
     <!-- Connect to MetaMask -->
      {#if !account}
     <button on:click={connectMetaMask} class="button">Connect to MetaMask</button>
     {/if}
+
     {#if account}
       <p>Connected Account: {accAddr}</p>
-      <!-- Check if admin -->
+      <div class="credits-card">
+      <h3>Total Credits Purchased</h3>
+      <p>{totalCredits} kWh</p>
+    </div>
       {#if isAdmin}
         <div class="admin-view">
           <h2>Admin View</h2>
@@ -311,8 +411,8 @@ async function getUserRole(contract, valueName) {
           <label for="quantity">Quantity (kWh):</label>
           <input type="number" id="quantity" bind:value={amount} />
       
-          <label for="price">Price (wei per kWh):</label>
-          <input type="number" id="price" bind:value={price} />
+          <label for="price">Price (ETH per kWh):</label>
+          <input type="number" id="price" bind:value={priceInETH} />
       
           <button on:click={listEnergyCreditHandler}>List Energy Credit</button>
           {#if loading}
@@ -325,7 +425,7 @@ async function getUserRole(contract, valueName) {
                 <strong>Credit ID:</strong> {credit.id}, 
                 <strong>Producer:</strong> {credit.producer},
                 <strong>Quantity:</strong> {credit.quantity} kWh, 
-                <strong>Price:</strong> {credit.price} wei per kWh
+                <strong>Price:</strong> {credit.price} ETH per kWh
                 <button on:click={() => selectedCreditId = credit.id} class="card-button">Select</button>
               </li>
             {/each}
@@ -335,8 +435,11 @@ async function getUserRole(contract, valueName) {
             {#if selectedCreditId !== null}
               <div>
                 <h3>Buy Credits</h3>
-                <input type="number" min="1" bind:value={quantityToBuy} placeholder="Quantity (kWh)" />
+                <input type="number" min="1" bind:value={quantityToBuy} placeholder="Quantity (kWh)" on:input={handleQuantityChange}/>
                 <button on:click={purchaseCredits} class="button">Buy Credits</button>
+              </div>
+              <div id="priceDisplay">
+                <p>Total Price: {totalPrice.toFixed(18)} ETH</p>
               </div>
             {/if}
           </div>
@@ -354,7 +457,7 @@ async function getUserRole(contract, valueName) {
             <strong>Credit ID:</strong> {credit.id}, 
             <strong>Producer:</strong> {credit.producer},
             <strong>Quantity:</strong> {credit.quantity} kWh, 
-            <strong>Price:</strong> {credit.price} wei per kWh
+            <strong>Price:</strong> {credit.price} ETH per kWh
             <button on:click={() => selectedCreditId = credit.id} class="card-button">Select</button>
           </li>
         {/each}
@@ -364,8 +467,11 @@ async function getUserRole(contract, valueName) {
             {#if selectedCreditId !== null}
             <div>
               <h3>Buy Credits</h3>
-              <input type="number" min="1" bind:value={quantityToBuy} placeholder="Quantity (kWh)" />
+              <input type="number" min="1" bind:value={quantityToBuy} placeholder="Quantity (kWh)" on:input={handleQuantityChange} />
               <button on:click={purchaseCredits} class="button">Buy Credits</button>
+            </div>
+            <div id="priceDisplay">
+              <p>Total Price: {totalPrice.toFixed(18)} ETH</p>
             </div>
           {/if}
         </div>
@@ -381,8 +487,8 @@ async function getUserRole(contract, valueName) {
       <label for="quantity">Quantity (kWh):</label>
       <input type="number" id="quantity" bind:value={amount} />
   
-      <label for="price">Price (wei per kWh):</label>
-      <input type="number" id="price" bind:value={price} />
+      <label for="price">Price (ETH per kWh):</label>
+      <input type="number" id="price" bind:value={priceInETH} />
   
       <button on:click={listEnergyCreditHandler}>List Energy Credit</button>
       {#if loading}
@@ -395,7 +501,7 @@ async function getUserRole(contract, valueName) {
             <strong>Credit ID:</strong> {credit.id}, 
             <strong>Producer:</strong> {credit.producer},
             <strong>Quantity:</strong> {credit.quantity} kWh, 
-            <strong>Price:</strong> {credit.price} wei per kWh
+            <strong>Price:</strong> {credit.price} ETH per kWh
             <button on:click={() => selectedCreditId = credit.id} class="card-button">Select</button>
           </li>
         {/each}
@@ -405,14 +511,19 @@ async function getUserRole(contract, valueName) {
           {#if selectedCreditId !== null}
             <div>
               <h3>Buy Credits</h3>
-              <input type="number" min="1" bind:value={quantityToBuy} placeholder="Quantity (kWh)" />
+              <input type="number" min="1" bind:value={quantityToBuy} placeholder="Quantity (kWh)" on:input={handleQuantityChange} />
               <button on:click={purchaseCredits} class="button">Buy Credits</button>
+            </div>
+            <div id="priceDisplay">
+              <p>Total Price: {totalPrice.toFixed(18)} ETH</p>
             </div>
           {/if}
         </div>
       {/if}
   
-
+      <div id="success-popup" class="popup" style="display: none;">
+        <p>Credits Purchased Successfully!</p>
+      </div>
     {/if}
   </div>
   
@@ -454,5 +565,29 @@ async function getUserRole(contract, valueName) {
   }
   .card-button:hover {
     background-color: #0056b3;
+  }
+  .popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 20px;
+  background-color: #28a745;
+  color: white;
+  border-radius: 5px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  display: none;
+}
+.credits-card {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 15px;
+    background-color: #28a745;
+    color: white;
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
   }
   </style>
